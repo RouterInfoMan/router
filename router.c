@@ -1,21 +1,40 @@
-extern "C" {
-	#include "lib.h"
-	#include "protocols.h"
-}
+
+#include "lib.h"
+#include "protocols.h"
+#include "routes.h"
+#include "eth.h"
+#include "arp.h"
+#include "icmp.h"
+#include "ip.h"
+
 #include <arpa/inet.h>
+#include <assert.h>
+#include <string.h>
 #include <linux/if_ether.h>
-#include <iostream>
+#include <time.h>
 
-#define MAX_ROUTES 1000000
+#define MAX_ROUTES 80000
+#define MAX_ARP_TABLE_LEN 100
 
-#define ETHERTYPE_IP 0x0800
-#define ETHERTYPE_ARP 0x0806
+struct route_table_entry routes[MAX_ROUTES];
+struct arp_table_entry arp_table[MAX_ARP_TABLE_LEN];
 
-#define ARPOP_REQUEST 1
-#define ARPOP_REPLY 2
+int routes_len = 0;
+int arp_table_len = 0;
+
+
+
+int mask_len(uint32_t mask) {
+	int len = 0;
+	while (mask) {
+		len += mask & 1;
+		mask >>= 1;
+	}
+	return len;
+}
 
 void recv_all(int interface, char *buf, size_t len);
-struct ether_header* hdr_eth(char *buf);
+
 struct iphdr* hdr_ip(char *buf);
 struct arp_header* hdr_arp(char *buf);
 struct icmphdr* hdr_icmp(char *buf);
@@ -33,8 +52,17 @@ uint32_t get_interface_ip_uint32(int interface) {
 
 
 
-struct route_table_entry routes[MAX_ROUTES];
 
+
+void print_ip(unsigned int ip)
+{
+    unsigned char bytes[4];
+    bytes[0] = ip & 0xFF;
+    bytes[1] = (ip >> 8) & 0xFF;
+    bytes[2] = (ip >> 16) & 0xFF;
+    bytes[3] = (ip >> 24) & 0xFF;   
+    printf("%d.%d.%d.%d\n", bytes[3], bytes[2], bytes[1], bytes[0]);        
+}
 
 
 int main(int argc, char *argv[])
@@ -44,8 +72,24 @@ int main(int argc, char *argv[])
 	// Do not modify this line
 	init(argc - 2, argv + 2);
 
-	read_rtable(argv[1], routes);
+	routes_len = read_rtable(argv[1], routes);
 	
+	sort_routes(routes, routes_len);
+
+	for (int i = 0; i < 0; i++) {
+		struct in_addr prefix, next_hop, mask;
+		prefix.s_addr = routes[i].prefix;
+		next_hop.s_addr = routes[i].next_hop;
+		mask.s_addr = routes[i].mask;
+
+		char *prefix_str = strdup(inet_ntoa(prefix));
+		char *next_hop_str = strdup(inet_ntoa(next_hop));
+		char *mask_str = strdup(inet_ntoa(mask));
+
+		printf("%s %s %s %d\n", prefix_str, next_hop_str, mask_str, routes[i].interface);
+	}
+
+	return 0;
 
 	while (1) {
 
@@ -68,70 +112,46 @@ int main(int argc, char *argv[])
 
 	}
 }
-struct route_table_entry* get_best_route(uint32_t dest_ip) {
-	struct route_table_entry *best_route = NULL;
-	for (int i = 0; i < MAX_ROUTES; i++) {
-		if ((dest_ip & routes[i].mask) == (routes[i].prefix & routes[i].mask)) {
-			if (best_route == NULL || routes[i].mask > best_route->mask) {
-				best_route = &routes[i];
-			}
-		}
-	}
-	return best_route;
-}
 
 void recv_all(int interface, char *buf, size_t len) {
 	interface = recv_from_any_link(buf, &len);
 	DIE(interface < 0, "recv_from_any_links");
 }
-struct ether_header* hdr_eth(char *buf) {
-    return (struct ether_header *) buf;
-}
-struct iphdr* hdr_ip(char *buf) {
-    return (struct iphdr *) (buf + sizeof(struct ether_header));
-}
-struct arp_header* hdr_arp(char *buf) {
-    return (struct arp_header *) (buf + sizeof(struct ether_header));
-}
-struct icmphdr* hdr_icmp(char *buf) {
-    return (struct icmphdr *) (buf + sizeof(struct ether_header) + sizeof(struct iphdr));
-}
 
-
-void handle_eth(char *buf, int interface) {
+void handle_eth(char *buf, size_t len, int interface) {
     struct ether_header *eth_hdr = hdr_eth(buf);
 
-    if (ntohs(eth_hdr->ether_type) == ETHERTYPE_IP) {
-        handle_ip(buf, interface);
+    if (eth_hdr->ether_type == ETHERTYPE_IP) {
+        handle_ip(buf, len, interface);
     }
-    if (ntohs(eth_hdr->ether_type) == ETHERTYPE_ARP) {
-        handle_arp(buf, interface);
+    if (eth_hdr->ether_type == ETHERTYPE_ARP) {
+        handle_arp(buf, len, interface);
     }
 
 }
 
-void handle_arp(char *buf, int interface) {
+void handle_arp(char *buf, size_t len, int interface) {
     struct arp_header *arp_hdr = hdr_arp(buf);
 
     if (ntohs(arp_hdr->op) == ARPOP_REQUEST) {
-        send_arp_reply(buf, interface);
+        send_arp_reply(buf, len, interface);
     }
 }
 
-void handle_ip(char* buf, int interface) {
+void handle_ip(char* buf, size_t len, int interface) {
     struct iphdr *ip_hdr = hdr_ip(buf);
 
     if (ip_hdr->protocol == IPPROTO_ICMP) {
-        handle_icmp(buf, interface);
+        handle_icmp(buf, len, interface);
         return;
     }
-    handle_ip_forwarding(buf, interface);
+    handle_ip_forwarding(buf, len, interface);
 }
-void handle_ip_forwarding(char *buf, int interface) {
+void handle_ip_forwarding(char *buf, size_t len, int interface) {
     struct ether_header *eth_hdr = hdr_eth(buf);
     struct iphdr *ip_hdr = hdr_ip(buf);
 
-    if (ntohl(ip_hdr->daddr) == get_interface_ip_uint32(interface)) {
+    if (ip_hdr->daddr == get_interface_ip_uint32(interface)) {
         return; // drop packet, reply for icmp only
     }
     int check = ip_hdr->check;
@@ -146,24 +166,38 @@ void handle_ip_forwarding(char *buf, int interface) {
     ip_hdr->ttl--;
     ip_hdr->check = checksum((uint16_t *) ip_hdr, sizeof(struct iphdr));
 
-    struct route_table_entry* route = get_best_route(ntohl(ip_hdr->daddr));
+    struct route_table_entry* route = lookup_route(routes, MAX_ROUTES, ip_hdr->daddr);
 	if (route == NULL) {
 		return; // drop packet, no route
 	}
 
 	// place route interface mac in header
 	get_interface_mac(route->interface, eth_hdr->ether_shost);
-	// find in arp table next hop mac
-	
 
+	// find in arp table next hop mac
+	struct arp_table_entry *arp_entry = lookup_arp_table(arp_table, arp_table_len, route->next_hop);
+
+	if (arp_entry == NULL) {
+		// save packet and send arp request
+		return;
+	
+	}
+	// place next hop mac in header
+	memcpy(eth_hdr->ether_dhost, arp_entry->mac, 6);
+
+	send_to_link(route->interface, buf, len);
 }
-void send_arp_reply(char *buf, int interface) {
+void send_arp_reply(char *buf, size_t len, int interface) {
 	struct ether_header *eth_hdr = hdr_eth(buf);
 	struct arp_header *arp_hdr = hdr_arp(buf);
 
+	char *packet = make_arp_reply(arp_hdr->sha, arp_hdr->spa, get_interface_mac(interface), get_interface_ip_uint32(interface));
+	send_to_link(interface, packet, ETHER_HEADER_LEN + ARP_HEADER_LEN);
+
+	free(packet);
 }
 
-void handle_icmp(char *buf, int interface) {
+void handle_icmp(char *buf, size_t len, int interface) {
 	struct icmphdr *icmp_hdr = hdr_icmp(buf);
 	struct iphdr *ip_hdr = hdr_ip(buf);
 	struct ether_header *eth_hdr = hdr_eth(buf);
