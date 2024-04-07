@@ -48,18 +48,6 @@ void handle_arp_request(char *buf, size_t len, int interface);
 void dequeue_packets();
 
 
-
-
-void print_mac(uint8_t *mac) {
-	for (int i = 0; i < 6; i++) {
-		printf("%02X", mac[i]);
-		if (i < 5) {
-			printf(":");
-		}
-	}
-	printf("\n");
-}
-
 int main(int argc, char *argv[])
 {
 	char buf[MAX_PACKET_LEN];

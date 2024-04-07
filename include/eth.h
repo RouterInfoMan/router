@@ -9,3 +9,4 @@
 #define ETHER_HEADER_LEN 14 
 
 struct ether_header* hdr_eth(char *buf);
+void print_mac(uint8_t *mac);
