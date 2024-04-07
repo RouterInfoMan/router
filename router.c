@@ -344,6 +344,8 @@ void handle_icmp(char *buf, size_t len, int interface, int res) {
 	}
 }
 void handle_ip_fwd_err(char *buf, size_t len, int interface, int res) {
+	printf("|---------HANDLING IP FORWARDING ERRORS-----------|\n");
+
 	if (res == IP_FWD_NO_ROUTE) {
 		printf("Sending ICMP Destination unreachable\n");
 
