@@ -16,10 +16,16 @@ struct arp_table_entry *lookup_arp_table(struct arp_table_entry *arp_table, int 
 }
 
 void add_new_entry(struct arp_table_entry *arp_table, int *arp_table_len, uint32_t ip, uint8_t *mac)
-{
-    arp_table[*arp_table_len].ip = ip;
-    memcpy(arp_table[*arp_table_len].mac, mac, 6);
-    (*arp_table_len)++;
+{   
+    struct arp_table_entry *entry = lookup_arp_table(arp_table, *arp_table_len, ip);
+    if (!entry) {
+        arp_table[*arp_table_len].ip = ip;
+        memcpy(arp_table[*arp_table_len].mac, mac, 6);
+        (*arp_table_len)++;
+        return;
+    }
+    // Update entry
+    memcpy(entry->mac, mac, 6);
 }
 
 char *make_arp_request(uint32_t lookup_ip, uint8_t *interface_mac, uint32_t interface_ip)
@@ -58,7 +64,7 @@ char *make_arp_reply(uint8_t *request_mac, uint32_t request_ip, uint8_t *interfa
     // eth header
     eth_hdr->ether_type = htons(ETHERTYPE_ARP);
     memcpy(eth_hdr->ether_shost, interface_mac, 6);
-    memcpy(eth_hdr->ether_dhost, eth_hdr_req->ether_shost, 6);
+    memcpy(eth_hdr->ether_dhost, request_mac, 6);
 
     // arp reply header
     arp_hdr->htype = htons(ARP_HTYPE_ETHERNET);
@@ -68,7 +74,7 @@ char *make_arp_reply(uint8_t *request_mac, uint32_t request_ip, uint8_t *interfa
     arp_hdr->op = htons(ARPOP_REPLY);
     // targets
     memcpy(arp_hdr->sha, interface_mac, 6);
-    arp_hdr->spa = htonl(interface_ip);
+    arp_hdr->spa = interface_ip;
     memcpy(arp_hdr->tha, request_mac, 6);
     arp_hdr->tpa = request_ip;
 

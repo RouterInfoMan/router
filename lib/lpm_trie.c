@@ -1,5 +1,6 @@
 #include "lpm_trie.h"
 
+
 trie_node_t *alloc_node()
 {
     trie_node_t *node = (trie_node_t *)malloc(sizeof(trie_node_t));
@@ -22,7 +23,7 @@ void free_node(trie_node_t *node)
 
 lpm_trie_t *lpm_trie_create()
 {
-    lpm_trie_t *trie = (lpm_trie_t *)malloc(sizeof(lpm_trie_t));\
+    lpm_trie_t *trie = (lpm_trie_t *)malloc(sizeof(lpm_trie_t));
     trie->root = alloc_node(); // 0.0.0.0 default gateway
 
     return trie;
@@ -34,11 +35,12 @@ void lpm_trie_destroy(lpm_trie_t *trie)
     free(trie);
 }
 
-void lpm_trie_insert(lpm_trie_t *trie, uint32_t prefix, uint32_t mask_len, uint32_t next_hop, int net_interface)
+void lpm_trie_insert(lpm_trie_t *trie, uint32_t prefix, int8_t mask_len, uint32_t next_hop, int net_interface)
 {
     trie_node_t *node = trie->root;
-
+    // print_ip(prefix);
     for (int i = 31; i >= 32 - mask_len; i--) {
+        // printf("%d\n", (prefix >> i) & 1);
         if ((prefix >> i) & 1) {
             if (node->r == NULL) {
                 node->r = alloc_node();
