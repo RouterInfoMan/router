@@ -9,7 +9,10 @@ First homework for PCom Course at ACS UPB.
 Requires gcc.
 Compile using ```make all```.
 
-Run router using ```./router routing_table.txt```
+Run router using ```make run_routerX```.
+## Ethernet
+
+The router will not process packet that are not destined for it, but it will check broadcasts.
 ## ARP
 
 The router supports ARP requests and replies and has a small table for keeping the entries.
