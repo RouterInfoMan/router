@@ -8,6 +8,7 @@
 #include "ip.h"
 #include "packet.h"
 #include "lpm_trie.h"
+#include "debug.h"
 
 #include <arpa/inet.h>
 #include <assert.h>
@@ -98,9 +99,7 @@ void dequeue_packets() {
 		return;
 	}
 
-	printf("Dequeueing packets\n");
 	printf("ARP table len: %d\n", arp_table_len);
-
 	node_t *current = packet_list->head;
 
     while (current != NULL) {
@@ -110,8 +109,19 @@ void dequeue_packets() {
             current = current->next;
             continue;
         }
-        struct ether_header *eth_hdr = hdr_eth(packet->data);
+		struct ether_header *eth_hdr = hdr_eth(packet->data);
+		struct iphdr *ip_hdr = hdr_ip(packet->data);
         memcpy(eth_hdr->ether_dhost, entry->mac, 6);
+		printf("|------------------SENDING PACKET-----------------|\n");
+		printf("Destination MAC: ");
+		print_mac(eth_hdr->ether_dhost);
+		printf("Source MAC:      ");
+		print_mac(eth_hdr->ether_shost);
+		printf("Destination IP:  ");
+		print_ip(ntohl(ip_hdr->daddr));
+		printf("Source IP:       ");
+		print_ip(ntohl(ip_hdr->saddr));
+
         send_to_link(packet->interface, packet->data, packet->len);
 
         node_t *next = current->next;
@@ -129,18 +139,17 @@ void handle_eth(char *buf, size_t len, int interface) {
 	struct ether_header *eth_hdr = hdr_eth(buf);
 
 	printf("\nReceived packet from interface %d\n", interface);
-	printf("|-----------------ETHERNET HEADER-----------------|\n");
-	printf("Destination MAC: ");
-	print_mac(eth_hdr->ether_dhost);
-	printf("Source MAC:      ");
-	print_mac(eth_hdr->ether_shost);
+	print_debug_eth_hdr(eth_hdr);
+
+	if (!is_packet_destined_to_interface(buf, interface)) {
+		printf("Packet not for this interface\n");
+		return;
+	}
 	
 	if (ntohs(eth_hdr->ether_type) == ETHERTYPE_IP) {
-		printf("Ethertype: ETHERTYPE_IP\n");
 		handle_ip(buf, len, interface);
 	}
 	if (ntohs(eth_hdr->ether_type) == ETHERTYPE_ARP) {
-		printf("Ethertype: ETHERTYPE_ARP\n");
 		handle_arp(buf, len, interface);
 	}
 }
@@ -148,7 +157,7 @@ void handle_eth(char *buf, size_t len, int interface) {
 void handle_arp(char *buf, size_t len, int interface) {
     struct arp_header *arp_hdr = hdr_arp(buf);
 	
-	printf("|-------------------ARP HEADER--------------------|\n");
+	print_debug_arp_hdr(arp_hdr);
     if (ntohs(arp_hdr->op) == ARPOP_REQUEST) {
         handle_arp_request(buf, len, interface);
     }
@@ -160,12 +169,6 @@ void handle_arp_reply(char *buf, size_t len, int interface)
 {
 	struct arp_header *arp_hdr = hdr_arp(buf);
 	
-	printf("ARPOP Type: ARPOP_REPLY\n");
-	printf("Destination MAC: ");
-	print_mac(arp_hdr->tha);
-	printf("Source MAC:      ");
-	print_mac(arp_hdr->sha);
-	
 	printf("|-----------------HANDLING REPLY------------------|\n");
 	printf("Adding new entry/updating entry\n");
 	add_new_entry(arp_table, &arp_table_len, arp_hdr->spa, arp_hdr->sha);
@@ -173,12 +176,6 @@ void handle_arp_reply(char *buf, size_t len, int interface)
 void handle_arp_request(char *buf, size_t len, int interface)
 {
 	struct arp_header *arp_hdr = hdr_arp(buf);
-
-	printf("ARPOP Type: ARPOP_REQUEST\n");
-	printf("Destination MAC: ");
-	print_mac(arp_hdr->tha);
-	printf("Source MAC:      ");
-	print_mac(arp_hdr->sha);
 	
 	uint8_t if_mac[6];
 	get_interface_mac(interface, if_mac);
@@ -191,7 +188,7 @@ void handle_arp_request(char *buf, size_t len, int interface)
 	}
 
 	printf("Sending ARP reply\n");
-	char *packet = make_arp_reply(arp_hdr->sha, arp_hdr->spa, if_mac, get_interface_ip_uint32(interface));
+	char *packet = make_arp_reply(arp_hdr->sha, arp_hdr->spa, if_mac, if_ip);
 	send_to_link(interface, packet, ETHER_HEADER_LEN + ARP_HEADER_LEN);
 
 	free(packet);
@@ -200,13 +197,8 @@ void handle_arp_request(char *buf, size_t len, int interface)
 
 void handle_ip(char* buf, size_t len, int interface) {
     struct iphdr *ip_hdr = hdr_ip(buf);
-	printf("|--------------------IP HEADER--------------------|\n");
-	printf("Destination IP: ");
-	print_ip(ntohl(ip_hdr->daddr));
-	printf("Source IP:      ");
-	print_ip(ntohl(ip_hdr->saddr));
-	printf("TTL: %d\n", ip_hdr->ttl);
-	printf("Protocol: %d\n", ip_hdr->protocol);
+
+	print_debug_ip_hdr(ip_hdr);
 
 	char *new_buf = malloc(len);
 	memcpy(new_buf, buf, len);
@@ -237,7 +229,7 @@ int handle_ip_forwarding(char *buf, size_t len, int interface) {
 		printf("Packet for router\n");
         return IP_FWD_FOR_ROUTER; // lets decide what to do with it
     }
-	int check = ntohs(ip_hdr->check);
+	uint16_t check = ntohs(ip_hdr->check);
     ip_hdr->check = 0;
     if (check != checksum((uint16_t *) ip_hdr, ntohs(ip_hdr->tot_len))) {
 		printf("Invalid checksum\n");
@@ -245,7 +237,7 @@ int handle_ip_forwarding(char *buf, size_t len, int interface) {
     }
 
     ip_hdr->ttl--;
-    ip_hdr->check = htons(checksum((uint16_t *) ip_hdr, sizeof(struct iphdr)));
+    ip_hdr->check = htons(checksum((uint16_t *) ip_hdr, ntohs(ip_hdr->tot_len)));
 
     uint32_t next_hop;
 	int route_interface;
@@ -259,6 +251,7 @@ int handle_ip_forwarding(char *buf, size_t len, int interface) {
 	printf("Found route\n");
 	printf("Next hop: ");
 	print_ip(ntohl(next_hop));
+	printf("Interface: %d\n", route_interface);
 
 	// place route interface mac in header
 	get_interface_mac(route_interface, eth_hdr->ether_shost);
@@ -269,6 +262,13 @@ int handle_ip_forwarding(char *buf, size_t len, int interface) {
 	printf("ARP Lookup\n");
 	if (arp_entry == NULL) {
 		printf("No arp entry\n");
+		printf("Sending ARP request\n");
+		printf("Target IP:     ");
+		print_ip(ntohl(next_hop));
+		printf("Interface IP:  ");
+		print_ip(ntohl(get_interface_ip_uint32(route_interface)));
+		printf("Interface MAC: ");
+		print_mac(eth_hdr->ether_shost);
 		// save packet and send arp request
 		char *arp_req = make_arp_request(next_hop, eth_hdr->ether_shost, get_interface_ip_uint32(route_interface));
 		send_to_link(route_interface, arp_req, ETHER_HEADER_LEN + ARP_HEADER_LEN);
@@ -276,6 +276,7 @@ int handle_ip_forwarding(char *buf, size_t len, int interface) {
 		char *new_buf = malloc(len);
 		memcpy(new_buf, buf, len);
 
+		printf("Adding packet to queue\n");
 		packet_t *packet = make_packet(new_buf, len, route_interface, next_hop);
 		add_packet(packet_list, packet);
 		return IP_FWD_GOOD;
@@ -294,12 +295,10 @@ void handle_icmp(char *buf, size_t len, int interface, int res) {
 	struct iphdr *ip_hdr = hdr_ip(buf);
 	struct ether_header *eth_hdr = hdr_eth(buf);
 
-	printf("|------------------ICMP HEADER--------------------|\n");
+	print_debug_icmp_hdr(icmp_hdr);
+
 	// Echo Reply
 	if (res == IP_FWD_FOR_ROUTER && icmp_hdr->type == ICMP_TYPE_ECHO_REQUEST) {
-		printf("ICMP Type: ICMP_ECHO_REQUEST\n");
-		printf("ICMP Code: %d\n", icmp_hdr->code);
-
 		uint16_t check;
 
 		check = ntohs(ip_hdr->check);
