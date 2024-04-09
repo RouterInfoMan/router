@@ -29,7 +29,8 @@ int arp_table_len = 0;
 
 
 
-int8_t mask_len(uint32_t mask) {
+int8_t mask_len(uint32_t mask)
+{
 	int8_t len = 0;
 	while (mask) {
 		len += mask & 1;
@@ -92,7 +93,8 @@ int main(int argc, char *argv[])
 	}
 }
 
-void dequeue_packets() {
+void dequeue_packets()
+{
 	printf("|-------------HANDLING QUEUED PACKETS-------------|\n");
 	if (is_empty(packet_list)) {
 		printf("No packets to dequeue\n");
@@ -135,7 +137,8 @@ void dequeue_packets() {
     }
 }
 
-void handle_eth(char *buf, size_t len, int interface) {
+void handle_eth(char *buf, size_t len, int interface)
+{
 	struct ether_header *eth_hdr = hdr_eth(buf);
 
 	printf("\nReceived packet from interface %d\n", interface);
@@ -154,7 +157,8 @@ void handle_eth(char *buf, size_t len, int interface) {
 	}
 }
 
-void handle_arp(char *buf, size_t len, int interface) {
+void handle_arp(char *buf, size_t len, int interface)
+{
     struct arp_header *arp_hdr = hdr_arp(buf);
 	
 	print_debug_arp_hdr(arp_hdr);
@@ -195,7 +199,8 @@ void handle_arp_request(char *buf, size_t len, int interface)
 }
 
 
-void handle_ip(char* buf, size_t len, int interface) {
+void handle_ip(char* buf, size_t len, int interface)
+{
     struct iphdr *ip_hdr = hdr_ip(buf);
 
 	print_debug_ip_hdr(ip_hdr);
@@ -214,7 +219,8 @@ void handle_ip(char* buf, size_t len, int interface) {
 
 	free(new_buf);
 }
-int handle_ip_forwarding(char *buf, size_t len, int interface) {
+int handle_ip_forwarding(char *buf, size_t len, int interface)
+{
     struct ether_header *eth_hdr = hdr_eth(buf);
     struct iphdr *ip_hdr = hdr_ip(buf);
 
@@ -290,7 +296,8 @@ int handle_ip_forwarding(char *buf, size_t len, int interface) {
 
 	return IP_FWD_GOOD;
 }
-void handle_icmp(char *buf, size_t len, int interface, int res) {
+void handle_icmp(char *buf, size_t len, int interface, int res)
+{
 	struct icmphdr *icmp_hdr = hdr_icmp(buf);
 	struct iphdr *ip_hdr = hdr_ip(buf);
 	struct ether_header *eth_hdr = hdr_eth(buf);
